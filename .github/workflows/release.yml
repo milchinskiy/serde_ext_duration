@@ -1,0 +1,144 @@
+---
+name: Test, Release & (optional) Publish
+on:
+  push:
+    tags: [v*]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    name: Test on stable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Build (lib + examples)
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          cargo build --locked --lib --examples --verbose
+      - name: Test (lib + unit/integration)
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          cargo test --locked --lib --tests --verbose
+  release:
+    name: Create GitHub Release
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Create GitHub Release (auto notes)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+  publish-dry-run:
+    name: Cargo publish — dry run
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need tags
+      - name: Install jq
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Read crate name & version
+        id: meta
+        run: |
+          JSON=$(cargo metadata --no-deps --format-version=1)
+          echo "name=$(echo "$JSON" | jq -r '.packages[0].name')" >> $GITHUB_OUTPUT
+          echo "version=$(echo "$JSON" | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
+      - name: Verify tag matches version
+        run: |
+          set -euo pipefail
+          TAG="v${{ steps.meta.outputs.version }}"
+          echo "Expecting tag: $TAG"
+          git fetch --tags --quiet
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Required tag '$TAG' does not exist."; exit 1; fi
+          HEAD=$(git rev-parse HEAD)
+          TAG_SHA=$(git rev-list -n 1 "$TAG")
+          if [ "$HEAD" != "$TAG_SHA" ]; then
+            echo "::error::Tag '$TAG' does not point to HEAD ($HEAD != $TAG_SHA)."; exit 1; fi
+          echo "Tag check OK."
+      - name: Ensure version not already published (crates.io)
+        run: |
+          set -euo pipefail
+          NAME='${{ steps.meta.outputs.name }}'
+          VER='${{ steps.meta.outputs.version }}'
+          UA="${GITHUB_REPOSITORY}@${GITHUB_RUN_ID} (contact: ${GITHUB_ACTOR}@users.noreply.github.com)"
+          URL="https://crates.io/api/v1/crates/${NAME}/${VER}"
+          # Query version endpoint; expect 200 if exists, 404 if not
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Accept: application/json" \
+            -H "User-Agent: $UA" \
+            "$URL" || true)
+          case "$CODE" in
+            200)
+              echo "::error::Version $NAME@$VER already exists on crates.io"; exit 1 ;;
+            404)
+              echo "Version availability OK." ;;
+            403|429)
+              echo "::warning::crates.io returned $CODE (forbidden/rate limited). Skipping API probe; will rely on cargo publish --dry-run." ;;
+            *)
+              echo "::warning::Unexpected HTTP $CODE from crates.io; will rely on cargo publish --dry-run." ;;
+          esac
+      - name: Package crate
+        run: |
+          cargo package --locked
+      - name: Publish (dry-run)
+        run: |
+          cargo publish --locked --dry-run
+  publish-live:
+    name: Cargo publish — live (requires approval)
+    needs: publish-dry-run
+    # Only for stable tags (skip pre-releases like v1.2.0-rc1)
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |-
+          cargo publish --locked
