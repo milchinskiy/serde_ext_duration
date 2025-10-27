@@ -310,3 +310,116 @@ impl Serialize for ExtDuration {
         serialize_human(&self.0, s)
     }
 }
+
+pub mod opt {
+    use super::*;
+
+    struct De(Duration);
+    impl<'de> Deserialize<'de> for De {
+        fn deserialize<D>(d: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            super::deserialize(d).map(De)
+        }
+    }
+
+    /// Root: human on serialize; flexible on deserialize.
+    pub fn serialize<S>(v: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match v {
+            Some(d) => super::serialize_human(d, s),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let inner = Option::<De>::deserialize(d)?;
+        Ok(inner.map(|De(d)| d))
+    }
+
+    /// Human variant
+    pub mod human {
+        use super::*;
+        pub fn serialize<S>(v: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match v {
+                Some(d) => super::super::serialize_human(d, s),
+                None => s.serialize_none(),
+            }
+        }
+        pub fn deserialize<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            super::deserialize(d)
+        }
+    }
+
+    /// Seconds (u64)
+    pub mod secs {
+        use super::*;
+        pub fn serialize<S>(v: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match v {
+                Some(d) => super::super::serialize_secs(d, s),
+                None => s.serialize_none(),
+            }
+        }
+        pub fn deserialize<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            super::deserialize(d)
+        }
+    }
+
+    /// Milliseconds (u64)
+    pub mod millis {
+        use super::*;
+        pub fn serialize<S>(v: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match v {
+                Some(d) => super::super::serialize_millis(d, s),
+                None => s.serialize_none(),
+            }
+        }
+        pub fn deserialize<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            super::deserialize(d)
+        }
+    }
+
+    /// Seconds as f64 (ms precision)
+    pub mod secs_f64_ms {
+        use super::*;
+        pub fn serialize<S>(v: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match v {
+                Some(d) => super::super::serialize_secs_f64_ms(d, s),
+                None => s.serialize_none(),
+            }
+        }
+        pub fn deserialize<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            super::deserialize(d)
+        }
+    }
+}

@@ -1,6 +1,6 @@
 [package]
 name = "serde_ext_duration"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Serde (de)serializer for std::time::Duration from int/float/string with multiple output formats"

@@ -63,6 +63,61 @@ let back: Cfg = serde_json::from_str(&json)?; // round‑trips
 
 ---
 
+## `Option<Duration>` support (`opt` module)
+
+Serde does **not** automatically apply `with = "…"` to the inner type of an `Option<T>`. The provided `opt` modules target the field type `Option<Duration>` directly.
+
+> **Important:** when using `#[serde(with = ...)]` on an `Option<…>` field and you want missing fields to become `None`, add `#[serde(default)]`.
+
+### Human output (root)
+
+```rust
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Cfg {
+  // missing or null -> None; otherwise parse int/float/string -> Some(Duration)
+  #[serde(default, with = "serde_ext_duration::opt")]
+  timeout: Option<std::time::Duration>,
+}
+```
+
+### Choose specific output shapes for `Option<Duration>`
+
+```rust
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Cfg {
+  #[serde(default, with = "serde_ext_duration::opt::human")]      a: Option<std::time::Duration>,
+  #[serde(default, with = "serde_ext_duration::opt::secs")]       b: Option<std::time::Duration>,
+  #[serde(default, with = "serde_ext_duration::opt::millis")]     c: Option<std::time::Duration>,
+  #[serde(default, with = "serde_ext_duration::opt::secs_f64_ms")] d: Option<std::time::Duration>,
+}
+```
+
+### Elide `None` at serialization
+
+```rust
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Cfg {
+  #[serde(default, with = "serde_ext_duration::opt")]
+  #[serde(skip_serializing_if = "Option::is_none")]
+  timeout: Option<std::time::Duration>,
+}
+```
+
+### Alternative: let Serde handle missing/`None` with a newtype
+
+If you prefer no `with` attributes at all:
+
+```rust
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Cfg {
+  timeout: Option<serde_ext_duration::ExtDuration>, // ExtDuration implements Serde itself
+}
+```
+
+Access the inner duration via `timeout.map(|d| d.0)`.
+
+---
+
 ## String grammar
 
 - Grammar is a sequence of `<unsigned-integer><unit>` tokens, separated by optional ASCII whitespace.
